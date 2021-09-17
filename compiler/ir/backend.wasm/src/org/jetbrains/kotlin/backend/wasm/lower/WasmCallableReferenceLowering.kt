@@ -17,10 +17,7 @@ import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.ir.builders.*
-import org.jetbrains.kotlin.ir.builders.declarations.addConstructor
-import org.jetbrains.kotlin.ir.builders.declarations.addFunction
-import org.jetbrains.kotlin.ir.builders.declarations.addValueParameter
-import org.jetbrains.kotlin.ir.builders.declarations.buildClass
+import org.jetbrains.kotlin.ir.builders.declarations.*
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.expressions.impl.IrInstanceInitializerCallImpl
@@ -40,7 +37,8 @@ val IrStatementOrigin?.isLambda: Boolean
     get() = this == IrStatementOrigin.LAMBDA || this == IrStatementOrigin.ANONYMOUS_FUNCTION
 
 // Originally copied from K/Native
-internal class WasmCallableReferenceLowering(private val context: WasmBackendContext) : FileLoweringPass, IrElementTransformerVoidWithContext() {
+internal class WasmCallableReferenceLowering(private val context: WasmBackendContext) : FileLoweringPass,
+    IrElementTransformerVoidWithContext() {
     // This pass ignores suspend function references and function references used in inline arguments to inline functions.
     private val ignoredFunctionReferences = mutableSetOf<IrFunctionReference>()
 
@@ -147,6 +145,7 @@ internal class WasmCallableReferenceLowering(private val context: WasmBackendCon
             if (isLambda) {
                 this.metadata = irFunctionReference.symbol.owner.metadata
             }
+            addField("receiver", context.irBuiltIns.anyNType)
         }
 
 // WASM(TODO)
@@ -227,6 +226,13 @@ internal class WasmCallableReferenceLowering(private val context: WasmBackendCon
 //                        }
                     }
                     +IrInstanceInitializerCallImpl(startOffset, endOffset, functionReferenceClass.symbol, context.irBuiltIns.unitType)
+                    if (samSuperType == null && boundReceiver != null) {
+                        +irSetField(
+                            irGet(functionReferenceClass.thisReceiver!!),
+                            functionReferenceClass.fields.first(),
+                            irGet(valueParameters.first())
+                        )
+                    }
                 }
             }
 
@@ -252,6 +258,8 @@ internal class WasmCallableReferenceLowering(private val context: WasmBackendCon
             body = callee.moveBodyTo(this, valueParameterMap)
         }
 
+        //private val receiverField = context.ir.symbols.functionReferenceReceiverField.owner
+
         private fun IrSimpleFunction.createFunctionReferenceInvokeMethod(receiver: IrValueDeclaration?) {
             for ((index, argumentType) in argumentTypes.withIndex()) {
                 addValueParameter {
@@ -273,13 +281,16 @@ internal class WasmCallableReferenceLowering(private val context: WasmBackendCon
                                 // Bound receiver parameter. For function references, this is stored in a field of the superclass.
                                 // For sam references, we just capture the value in a local variable and LocalDeclarationsLowering
                                 // will put it into a field.
-//                                if (samSuperType == null)
-//                                    irImplicitCast(
-//                                        irGetField(irGet(dispatchReceiverParameter!!), fakeOverrideReceiverField),
-//                                        boundReceiver.second.type
-//                                    )
-//                                else
-                                    irGet(receiver ?: error("Binding receivers is not supported yet"))
+                                if (samSuperType == null)
+                                    irImplicitCast(
+                                        irGetField(
+                                            irGet(dispatchReceiverParameter!!),
+                                            functionReferenceClass.fields.first(),
+                                        ),
+                                        boundReceiver.second.type
+                                    )
+                                else
+                                    irGet(receiver!!)
 
                             // If a vararg parameter corresponds to exactly one KFunction argument, which is an array, that array
                             // is forwarded as is.
