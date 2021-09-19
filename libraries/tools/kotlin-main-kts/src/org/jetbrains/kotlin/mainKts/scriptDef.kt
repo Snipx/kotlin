@@ -40,15 +40,18 @@ abstract class MainKtsScript(val args: Array<String>)
 const val COMPILED_SCRIPTS_CACHE_DIR_ENV_VAR = "KOTLIN_MAIN_KTS_COMPILED_SCRIPTS_CACHE_DIR"
 const val COMPILED_SCRIPTS_CACHE_DIR_PROPERTY = "kotlin.main.kts.compiled.scripts.cache.dir"
 const val COMPILED_SCRIPTS_CACHE_VERSION = 1
+const val SCRIPT_FILE_LOCATION_DEFAULT_VARIABLE_NAME = "__FILE__"
 
 class MainKtsScriptDefinition : ScriptCompilationConfiguration(
     {
-        defaultImports(DependsOn::class, Repository::class, Import::class, CompilerOptions::class)
+        defaultImports(DependsOn::class, Repository::class, Import::class, CompilerOptions::class, ScriptFileLocation::class)
         jvm {
             dependenciesFromClassContext(MainKtsScriptDefinition::class, "kotlin-main-kts", "kotlin-stdlib", "kotlin-reflect")
         }
         refineConfiguration {
+            beforeCompiling(::configureScriptFileLocationPathVariablesForCompilation)
             onAnnotations(DependsOn::class, Repository::class, Import::class, CompilerOptions::class, handler = MainKtsConfigurator())
+            onAnnotations(ScriptFileLocation::class, handler = ScriptFileLocationCustomConfigurator())
             beforeCompiling(::configureProvidedPropertiesFromJsr223Context)
         }
         ide {
@@ -64,6 +67,7 @@ object MainKtsEvaluationConfiguration : ScriptEvaluationConfiguration(
     {
         scriptsInstancesSharing(true)
         refineConfigurationBeforeEvaluate(::configureProvidedPropertiesFromJsr223Context)
+        refineConfigurationBeforeEvaluate(::configureScriptFileLocationPathVariablesForEvaluation)
         refineConfigurationBeforeEvaluate(::configureConstructorArgsFromMainArgs)
     }
 )
@@ -89,6 +93,63 @@ class MainKtsHostConfiguration : ScriptingHostConfiguration(
         }
     }
 )
+
+fun configureScriptFileLocationPathVariablesForEvaluation(context: ScriptEvaluationConfigurationRefinementContext): ResultWithDiagnostics<ScriptEvaluationConfiguration> {
+    // TODO KT-48758 move to using properties from compilation configuration
+    val scriptId = context.compiledScript.sourceLocationId ?: return context.evaluationConfiguration.asSuccess()
+    val scriptFileLocation = context.evaluationConfiguration[ScriptEvaluationConfiguration.scriptFileLocation]!![scriptId]
+        ?: return context.evaluationConfiguration.asSuccess()
+
+    val scriptFileLocationVariable =
+        context.evaluationConfiguration[ScriptEvaluationConfiguration.scriptFileLocationVariables]?.get(scriptId)
+
+    val res = if (scriptFileLocationVariable != null) {
+        context.evaluationConfiguration.with {
+            providedProperties.put(mapOf(scriptFileLocationVariable to scriptFileLocation))
+        }
+    } else context.evaluationConfiguration
+    return res.asSuccess()
+}
+
+fun configureScriptFileLocationPathVariablesForCompilation(context: ScriptConfigurationRefinementContext): ResultWithDiagnostics<ScriptCompilationConfiguration> {
+    val scriptFile = (context.script as? FileBasedScriptSource)?.file ?: return context.compilationConfiguration.asSuccess()
+    val scriptId = context.script.locationId ?: return context.compilationConfiguration.asSuccess()
+    if (!scriptFile.exists()) {
+        return context.compilationConfiguration.asSuccess()
+    }
+    val customScriptFileLocationVariableSet =
+        context.compilationConfiguration[ScriptCompilationConfiguration.scriptFileLocationVariables]!![scriptId] != null
+    val compilationConfiguration = ScriptCompilationConfiguration(context.compilationConfiguration) {
+        if (!customScriptFileLocationVariableSet) {
+            providedProperties.put(mapOf(SCRIPT_FILE_LOCATION_DEFAULT_VARIABLE_NAME to KotlinType(File::class)))
+        }
+    }
+    compilationConfiguration[ScriptCompilationConfiguration.scriptFileLocation]!![scriptId] = scriptFile
+    if (!customScriptFileLocationVariableSet) {
+        compilationConfiguration[ScriptCompilationConfiguration.scriptFileLocationVariables]!![scriptId] =
+            SCRIPT_FILE_LOCATION_DEFAULT_VARIABLE_NAME
+    }
+    return compilationConfiguration.asSuccess()
+}
+
+class ScriptFileLocationCustomConfigurator : RefineScriptCompilationConfigurationHandler {
+
+    override operator fun invoke(context: ScriptConfigurationRefinementContext): ResultWithDiagnostics<ScriptCompilationConfiguration> {
+
+        val scriptLocationVariable = context.collectedData?.get(ScriptCollectedData.collectedAnnotations)
+            ?.filterByAnnotationType<ScriptFileLocation>()?.firstOrNull()?.annotation?.variable
+            ?: return context.compilationConfiguration.asSuccess()
+
+        val scriptId = context.script.locationId ?: return context.compilationConfiguration.asSuccess()
+
+        val compilationConfiguration = ScriptCompilationConfiguration(context.compilationConfiguration) {
+            providedProperties.put(mapOf(scriptLocationVariable to KotlinType(File::class)))
+        }
+
+        compilationConfiguration[ScriptCompilationConfiguration.scriptFileLocationVariables]!![scriptId] = scriptLocationVariable
+        return compilationConfiguration.asSuccess()
+    }
+}
 
 fun configureConstructorArgsFromMainArgs(context: ScriptEvaluationConfigurationRefinementContext): ResultWithDiagnostics<ScriptEvaluationConfiguration> {
     val mainArgs = context.evaluationConfiguration[ScriptEvaluationConfiguration.jvm.mainArguments]

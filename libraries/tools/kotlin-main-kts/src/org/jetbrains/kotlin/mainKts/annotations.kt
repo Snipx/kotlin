@@ -33,3 +33,7 @@ annotation class Import(vararg val paths: String)
 @Repeatable
 @Retention(AnnotationRetention.SOURCE)
 annotation class CompilerOptions(vararg val options: String)
+
+@Target(AnnotationTarget.FILE)
+@Retention(AnnotationRetention.SOURCE)
+annotation class ScriptFileLocation(val variable: String)
