@@ -316,6 +316,9 @@ message Function {
   optional Type receiver_type = 5;
   optional int32 receiver_type_id = 8 [(type_id_in_table) = true];
 
+  repeated Type context_receiver_type = 10;
+  optional int32 context_receiver_type_id = 11 [(type_id_in_table) = true];
+
   repeated ValueParameter value_parameter = 6;
 
   optional TypeTable type_table = 30;
