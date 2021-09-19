@@ -43,12 +43,13 @@ const val COMPILED_SCRIPTS_CACHE_VERSION = 1
 
 class MainKtsScriptDefinition : ScriptCompilationConfiguration(
     {
-        defaultImports(DependsOn::class, Repository::class, Import::class, CompilerOptions::class)
+        defaultImports(DependsOn::class, Repository::class, Import::class, CompilerOptions::class, ScriptFileLocation::class)
         jvm {
             dependenciesFromClassContext(MainKtsScriptDefinition::class, "kotlin-main-kts", "kotlin-stdlib", "kotlin-reflect")
         }
         refineConfiguration {
-            onAnnotations(DependsOn::class, Repository::class, Import::class, CompilerOptions::class, handler = MainKtsConfigurator())
+            onAnnotations(DependsOn::class, Repository::class, Import::class, CompilerOptions::class, ScriptFileLocation::class,
+                          handler = MainKtsConfigurator())
             beforeCompiling(::configureProvidedPropertiesFromJsr223Context)
         }
         ide {
@@ -63,6 +64,7 @@ class MainKtsScriptDefinition : ScriptCompilationConfiguration(
 object MainKtsEvaluationConfiguration : ScriptEvaluationConfiguration(
     {
         scriptsInstancesSharing(true)
+        refineConfigurationBeforeEvaluate(::configureScriptFileLocationPathVariables)
         refineConfigurationBeforeEvaluate(::configureProvidedPropertiesFromJsr223Context)
         refineConfigurationBeforeEvaluate(::configureConstructorArgsFromMainArgs)
     }
@@ -89,6 +91,17 @@ class MainKtsHostConfiguration : ScriptingHostConfiguration(
         }
     }
 )
+
+fun configureScriptFileLocationPathVariables(context: ScriptEvaluationConfigurationRefinementContext): ResultWithDiagnostics<ScriptEvaluationConfiguration> {
+    val scriptFileLocationVars = context.evaluationConfiguration[ScriptEvaluationConfiguration.scriptFileLocationVariables]
+    val scriptFileLocation = context.evaluationConfiguration[ScriptEvaluationConfiguration.scriptFileLocation]!!.get()
+    val res = if (scriptFileLocationVars != null && scriptFileLocationVars.isNotEmpty()) {
+        context.evaluationConfiguration.with {
+            providedProperties.putIfAny(scriptFileLocationVars.map { it to scriptFileLocation })
+        }
+    } else context.evaluationConfiguration
+    return res.asSuccess()
+}
 
 fun configureConstructorArgsFromMainArgs(context: ScriptEvaluationConfigurationRefinementContext): ResultWithDiagnostics<ScriptEvaluationConfiguration> {
     val mainArgs = context.evaluationConfiguration[ScriptEvaluationConfiguration.jvm.mainArguments]
@@ -149,6 +162,10 @@ class MainKtsConfigurator : RefineScriptCompilationConfigurationHandler {
             it.annotation.options.toList()
         }
 
+        val scriptLocationVariables = annotations.filterByAnnotationType<ScriptFileLocation>().flatMap {
+            it.annotation.variables.toList()
+        }
+
         val resolveResult = try {
             @Suppress("DEPRECATION_ERROR")
             internalScriptingRunSuspend {
@@ -160,11 +177,15 @@ class MainKtsConfigurator : RefineScriptCompilationConfigurationHandler {
         }
 
         return resolveResult.onSuccess { resolvedClassPath ->
-            ScriptCompilationConfiguration(context.compilationConfiguration) {
+            val compilationConfiguration = ScriptCompilationConfiguration(context.compilationConfiguration) {
                 updateClasspath(resolvedClassPath)
                 if (importedSources.isNotEmpty()) importScripts.append(importedSources.values.map { FileScriptSource(it.first) })
                 if (compileOptions.isNotEmpty()) compilerOptions.append(compileOptions)
-            }.asSuccess()
+                providedProperties.putIfAny(scriptLocationVariables.map { it to KotlinType(File::class) })
+            }
+            compilationConfiguration[ScriptCompilationConfiguration.scriptFileLocation]!!.set((context.script as? FileBasedScriptSource)?.file)
+            compilationConfiguration[ScriptCompilationConfiguration.scriptFileLocationVariables]!!.addAll(scriptLocationVariables)
+            return compilationConfiguration.asSuccess()
         }
     }
 }

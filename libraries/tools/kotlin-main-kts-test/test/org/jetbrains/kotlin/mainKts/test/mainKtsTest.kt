@@ -145,6 +145,19 @@ class MainKtsTest {
         Assert.assertEquals(listOf("Hi from sub", "Hi from super", "Hi from random"), out)
     }
 
+    @Test
+    fun testScriptFileLocation() {
+        val resOk = evalFile(File("$TEST_DATA_ROOT/script-file-location.main.kts"))
+        assertSucceeded(resOk)
+        val resultValue = resOk.valueOrThrow().returnValue
+        assertTrue(resultValue is ResultValue.Value) { "Result value should be of type Value" }
+        val value = (resultValue as ResultValue.Value).value!!
+        assertEquals("String", value::class.simpleName)
+        val expectedPathSuffix = "libraries/tools/kotlin-main-kts-test/testData/script-file-location.main.kts"
+        val actualPath = (value as String).replace("\\", "/")
+        assertTrue(actualPath.endsWith(expectedPathSuffix)) { "Script file path does not end with expected path" }
+    }
+
     private fun assertIsJava6Bytecode(res: ResultWithDiagnostics<EvaluationResult>) {
         val scriptClassResource = res.valueOrThrow().returnValue.scriptClass!!.java.run {
             getResource("$simpleName.class")

@@ -7,7 +7,9 @@
 
 package kotlin.script.experimental.api
 
+import java.io.File
 import java.io.Serializable
+import java.util.*
 import kotlin.reflect.KClass
 import kotlin.script.experimental.host.ScriptingHostConfiguration
 import kotlin.script.experimental.host.getEvaluationContext
@@ -58,6 +60,10 @@ val ScriptEvaluationConfigurationKeys.implicitReceivers by PropertiesCollection.
  * {@link ScriptCompilationConfigurationKeys#providedProperties}
  */
 val ScriptEvaluationConfigurationKeys.providedProperties by PropertiesCollection.key<Map<String, Any?>>() // external variables
+
+val ScriptEvaluationConfigurationKeys.scriptFileLocationVariables by PropertiesCollection.key<MutableList<String>>(mutableListOf())
+
+val ScriptEvaluationConfigurationKeys.scriptFileLocation by PropertiesCollection.key(FileWrapper())
 
 /**
  * Constructor arguments, additional to implicit receivers and provided properties, according to the script base class constructor

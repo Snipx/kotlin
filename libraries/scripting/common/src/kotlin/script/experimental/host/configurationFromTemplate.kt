@@ -5,6 +5,7 @@
 
 package kotlin.script.experimental.host
 
+import java.util.*
 import kotlin.reflect.KClass
 import kotlin.script.experimental.annotations.KotlinScript
 import kotlin.script.experimental.api.*
@@ -42,7 +43,19 @@ fun createScriptDefinitionFromTemplate(
         constructCompilationConfiguration(mainAnnotation, hostConfiguration, templateClass, baseClassType, compilation)
     val evaluationConfiguration = constructEvaluationConfiguration(mainAnnotation, hostConfiguration, evaluation)
 
-    return ScriptDefinition(compilationConfiguration, evaluationConfiguration)
+    // TODO KT-48758 get rid of this forced variable sharing by accessing compilation configuration from evaluation one
+    val scriptFileLocationWrapper = FileWrapper()
+    val scriptFileLocationVars = mutableListOf<String>()
+    val compilationConfigurationWithSharedScriptLocation = ScriptCompilationConfiguration(compilationConfiguration) {
+        scriptFileLocationVariables.put(scriptFileLocationVars)
+        scriptFileLocation.put(scriptFileLocationWrapper)
+    }
+    val evaluationConfigurationWithSharedScriptLocation = ScriptEvaluationConfiguration(evaluationConfiguration) {
+        scriptFileLocationVariables.put(scriptFileLocationVars)
+        scriptFileLocation.put(scriptFileLocationWrapper)
+    }
+
+    return ScriptDefinition(compilationConfigurationWithSharedScriptLocation, evaluationConfigurationWithSharedScriptLocation)
 }
 
 /**
